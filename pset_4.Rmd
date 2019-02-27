@@ -1,0 +1,215 @@
+---
+title: "Pset 4"
+author: "Will Smiles"
+date: "2/26/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# Load all necessary libraries
+library(dbplyr)
+library(tidyverse)
+library(janitor)
+library(gt)
+library(lubridate)
+library(readxl)
+```
+
+# Question 1 
+```{r question_1, message=FALSE, echo=FALSE,}
+# Read in initial data
+poll <- read_csv("ps_4_elections-poll-nc09-3.csv")
+
+# Question 1
+
+# Madlib 1 
+dem <- poll %>% 
+  # Filter for rows where response value is "Dem" 
+  filter(response == "Dem") %>% 
+  # nrow() calculates number of rows in the tbl, giving us the number of Dem responses
+  nrow()
+
+# Madlib 2
+rep <- poll %>% 
+  # Filter for rows where hrep_fav value is "Favorable" 
+  filter(response == "Rep")
+
+undecided <- poll %>% 
+  # Filter for rows where response value is "Und" 
+  filter(response == "Und")
+
+# Subtract number of rows of undecided tbl from number of rows of rep  tbl to find difference in value
+rep_und_diff <- nrow(rep) - nrow(undecided)
+
+
+# Madlib 3 
+gender_diff <- poll %>%
+  # Filter for rows where 'gender' value does not equal 'gender_combined' value
+  filter(gender != gender_combined) %>% 
+   # nrow() calculates number of rows in the tbl, giving us the number of differences
+  nrow()
+
+# Madlib 4
+white_diff <- poll %>% 
+  # Filter for rows where 'race_eth' value equals "White" but "file_race_black" does not equal "White"
+  filter(race_eth == "White") %>% 
+  filter(file_race_black != "White") %>% 
+  # nrow() calculates number of rows in the tbl, giving us the number of differences
+  nrow()
+
+# Madlib 5
+rep_time <- poll %>% 
+  # Filter for rows where response is "Rep"
+  filter(response == "Rep") %>% 
+  # Sort in ascending order by timestamp value
+  arrange(timestamp) %>% 
+  # Retrieve first row
+  slice(1) %>% 
+  # Pull timestamp value from 1st Rep row
+  pull(timestamp)
+
+dem_time <- poll %>% 
+  # Filter for rows where response is "Dem"
+  filter(response == "Dem") %>% 
+  # Sort in ascending order by timestamp value
+  arrange(timestamp) %>% 
+  # Retrieve first row
+  slice(1) %>% 
+  # Pull timestamp value from 1st Dem row
+  pull(timestamp)
+
+# Calculate the difference rounded by minute by using minute() function for each pulled timestamp value and subtracting
+min_diff <- minute(rep_time) - minute(dem_time)
+```
+
+There were `r dem` respondents who supported the Democratic candidate.
+
+There were `r rep_und_diff` more respondents who favored the Republican candidate than who were Undecided.
+
+There are two gender variables (`gender` and `gender_combined`). There are `r gender_diff` individuals for whom these variables have different values.
+
+There are `r white_diff` respondents listed as “White” under `race_eth` who are not listed as “White” under `file_race_black`.
+
+The first response of Rep came `r min_diff` minutes (rounded to the nearest minute) before the first response of Dem.
+
+# Question 2
+```{r question_2, echo=FALSE, results="asis"}
+# Quesiton 2
+table <- poll %>% 
+  # Select for response, final_weight, and race_eth columns
+  select(response, final_weight, race_eth) %>% 
+  # Group by race_eth and response
+  group_by(race_eth, response) %>% 
+  # Calculate the total sums of the weighted values
+  summarize(total = sum(final_weight)) %>%   
+  # Filter for rows without refuse/don't know responses
+  filter(race_eth != "[DO NOT READ] Don't know/Refused") %>% 
+  # Set key variable of table spread to response (columns), and set fill= 0 to set all N/A values to 0
+  spread(key =  response, value = total, fill=0) %>% 
+  # Create all variable that is the sum of all possible response values
+  mutate(all = Dem + Rep + Und + `3`) %>% 
+  # Alter Dem variable to be percentage of Dem responses (Dem divided by All)
+  mutate(Dem = Dem / all) %>% 
+  # Alter Rep variable to be percentage of Rep responses (Rep divided by All)
+  mutate(Rep = Rep / all) %>% 
+  # Alter Und variable to be percentage of Und responses (Und divided by All)
+  mutate(Und = Und / all) %>% 
+  # Deselect all variable and the 3rd party variable
+  select(-all, -`3`) %>% 
+  arrange(factor(race_eth, levels = c("White","Black","Hispanic","Asian","Other"))) %>% 
+  ungroup() %>% 
+
+# Create gt table object
+gt() %>% 
+  # Use tab_header function to add title to the table
+  tab_header(
+    title = "Polling Results in North Carolina 9th Congressional District") %>%
+  # Use tab_source_note function to add source caption to the table
+  tab_source_note(
+    source_note="New York Times Upshot/Siena College 2018 live polls") %>% 
+  
+  # # Center the values in the table using tab_style function and setting text_align
+
+  
+  # Use cols_label function to add labels to each column
+  cols_label(
+    race_eth = "Race",
+    Dem = "Democrat",
+    Rep = "Republican",
+    Und = "Undecided"
+  ) %>%
+  
+
+  
+  # Use fmt_percent function to format numerical values of Dem, Rep, and Und to a percent
+  fmt_percent(columns = vars(Dem, Rep, Und),
+              # Round to the nearest percent using decimals argument
+              decimals = 0) %>% 
+  # Set all zero values in the table to N/A using na_if function
+  na_if(0) %>% 
+  # Use fmt_missing function to specifically set zero value to "-" in Row 4 of Undecided Column
+  fmt_missing(columns = vars(Und), rows = 4) %>% 
+
+  # Take the table file, turn it into html, and send it to our md file
+  as_raw_html() %>% as.character() %>% cat() 
+```
+
+# Question 3
+```{r question_3, echo=FALSE}
+
+violin <- poll %>%
+  # Select final_weight and education columns
+  select(final_weight, educ) %>% 
+  # Filter for rows that do not equal "[DO NOT READ] Refused"
+  filter(educ != "[DO NOT READ] Refused")
+
+# Reorder the educ values in the proper order, use fct_rev to reverse the order on the graph because of the later coord_flip()
+violin$educ <- fct_rev(factor(violin$educ, levels = c("Graduate or Professional Degree", "Bachelors' degree", "Some college or trade school", "High school", "Grade school")))
+
+# Plot the violin data setting x value to educ and y value to final_weight
+ggplot(violin, aes(x=educ, y= final_weight)) +
+
+# Add Violin plot
+geom_violin() +
+# Add Jitter plot 
+geom_jitter(alpha = .4, width = .2) +
+
+# Fip the x and y axes using coord_flip function
+coord_flip() +
+
+# Add the appropriate axes titles, subtitles, and caption 
+labs(title ="More Educated Matter Less in North Carolina 9th", subtitle ="Poll gives more weight for people who are less likely to participate in polls", x = NULL, y = "Weight Given to Respondent in Calculating Poll Results", caption="New York Times Upshot/Siena College 2018 live polls" )
+```
+
+
+# Question 4
+```{r question_4, echo=FALSE}
+# Create a barchart for party response percentages according to different age groups
+response_by_ager <- poll %>% 
+  # Filter out refused age responses
+  filter(ager != "[DO NOT READ] Refused") %>% 
+  # Filter out 3rd party responses (we did not pay attention to these responses earlier in our table, as they are perhaps unimportant for polling purposes)
+  filter(response != 3) %>%
+  # Group by ager and response variables
+  group_by(ager , response) %>% 
+  # Count number of different party response types by age group
+  summarize(N = n()) %>% 
+  # Create frequency ratio and percentage variables by dividing number of frequency of response types by total number of responses
+  mutate(freq = N / sum(N), pct = round((freq*100), 0))
+
+# Create a  bar chart that illustrates the percentage of party responses by age group 
+# Set x axis to reflect the age groups, y axis to reflect the percentages, and fill the color according to the response type
+ggplot(response_by_ager, aes(x = ager, y = pct, fill = response)) + 
+  # Geom_col(position="dodge 2") creates vertical bar chart
+  geom_col(position = "dodge2") + labs(x = "Age Group",y = "Percent of Responses", fill = "Response")+
+  labs(title="Party Response Percentage By Age Group") +
+  
+  # Fill apropriate colors for each response party
+  scale_fill_manual(values = c("blue", "red", "grey")) +
+  
+  # Place legend at the top and center the title using plot.title() and element_text functions by setting hjust =.5
+  theme(legend.position = "top", plot.title = element_text(hjust = 0.5))
+```
+
+
